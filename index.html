@@ -10,7 +10,7 @@
         body { background-color: #FFF9E7; color: #5D4037; }
         .card { background: white; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
         .btn-orange { background-color: #E67E22; color: white; border-radius: 50px; }
-    </script>
+    </style>
 </head>
 <body class="p-6">
     <header class="mb-8 text-center">
@@ -31,13 +31,21 @@
             <h2 class="font-bold">導師正在閱讀你的筆記...</h2>
         </div>
         <div id="aiResponse" class="card p-6 text-sm leading-relaxed whitespace-pre-wrap">
-            </div>
+        </div>
     </div>
 
     <script type="module">
         import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
 
-        const API_KEY = AIzaSyDOgX8MrkY4O-JnVvND8mzraQXXU_Ef8QE; // 記得替換
+        // 安全檢查邏輯：從本地取得或詢問 Key
+        let API_KEY = localStorage.getItem('my_gemini_key');
+        if (!API_KEY) {
+            API_KEY = prompt("請輸入您的 Gemini API Key：");
+            if (API_KEY) {
+                localStorage.setItem('my_gemini_key', API_KEY);
+            }
+        }
+
         const genAI = new GoogleGenerativeAI(API_KEY);
 
         document.getElementById('cameraInput').onchange = async (e) => {
@@ -48,14 +56,13 @@
             document.getElementById('aiSection').classList.remove('hidden');
             document.getElementById('aiResponse').innerText = "導師思考中...";
 
-            // 將圖片轉為 Base64
             const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onloadend = async () => {
                 const base64Data = reader.result.split(',')[1];
                 
                 try {
-                    // 調用 Gemini 3 Flash 模型
+                    // 使用 Gemini 3 Flash 模型
                     const model = genAI.getGenerativeModel({ model: "gemini-3-flash" });
                     const prompt = `
                         你是一位專屬思維導師。
@@ -72,6 +79,10 @@
                     document.getElementById('aiResponse').innerText = result.response.text();
                 } catch (err) {
                     document.getElementById('aiResponse').innerText = "抱歉，導師斷線了：" + err.message;
+                    // 如果是 API Key 錯誤，清除儲存讓使用者下次重新輸入
+                    if(err.message.includes("API key")) {
+                        localStorage.removeItem('my_gemini_key');
+                    }
                 }
             };
         };
