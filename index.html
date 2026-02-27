@@ -6,12 +6,10 @@
     <title>DaVinciLens Lite</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 模擬截圖中的溫暖暖色調風格 */
-        body { background-color: #FFF9E7; color: #5D4037; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #FFF9E7; color: #5D4037; font-family: sans-serif; }
         .card { background: white; border-radius: 24px; box-shadow: 0 8px 20px rgba(0,0,0,0.04); }
         .btn-orange { background: linear-gradient(135deg, #E67E22, #D35400); color: white; border-radius: 50px; transition: all 0.2s; }
         .btn-orange:active { transform: scale(0.96); opacity: 0.9; }
-        .mentor-tag { background-color: #F39C12; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; margin-left: 8px; }
     </style>
 </head>
 <body class="p-6 max-w-md mx-auto min-h-screen">
@@ -23,7 +21,7 @@
     <div class="card p-8 mb-8 text-center">
         <div class="mb-6 opacity-80 text-lg">別讓你最好的靈感<br><span class="font-bold text-orange-600">死在筆記裡</span></div>
         <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
-        <button onclick="document.getElementById('cameraInput').click()" class="btn-orange w-full py-5 text-lg font-bold shadow-lg shadow-orange-200">
+        <button onclick="document.getElementById('cameraInput').click()" class="btn-orange w-full py-5 text-lg font-bold shadow-lg">
             📸 拍下第一則靈感
         </button>
     </div>
@@ -32,36 +30,89 @@
         <div class="flex items-center mb-4 px-2">
             <span class="text-2xl">🧠</span>
             <div class="flex flex-col ml-3">
-                <div class="flex items-center">
-                    <span class="font-bold text-gray-800">思維導師</span>
-                    <span class="mentor-tag">ONLINE</span>
-                </div>
-                <span class="text-xs text-gray-400">正在瀏覽你過去的筆記，尋找關聯...</span>
+                <span id="mentorStatus" class="font-bold text-gray-800 text-sm">正在尋找合適的導師版本...</span>
             </div>
         </div>
         <div id="aiResponse" class="card p-6 text-sm leading-relaxed whitespace-pre-wrap text-gray-700 border-l-4 border-orange-400">
-            導師正在研讀中...
+            正在啟動導師...
         </div>
         <div class="mt-4 text-center">
-            <button onclick="location.reload()" class="text-xs text-gray-400 underline">重整頁面 / 清除當前對話</button>
+            <button onclick="localStorage.removeItem('my_gemini_key'); location.reload();" class="text-xs text-gray-400 underline">重設 API Key</button>
         </div>
     </div>
 
     <script type="module">
         import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
 
-        // 1. 安全性 Key 檢查邏輯
+        // 1. 安全性 Key 檢查
         let API_KEY = localStorage.getItem('my_gemini_key');
         if (!API_KEY) {
-            API_KEY = prompt("請輸入您的 Gemini API Key 以啟動導師：");
-            if (API_KEY) {
-                localStorage.setItem('my_gemini_key', API_KEY);
-            } else {
-                alert("未輸入 Key，App 將無法運作。");
-            }
+            API_KEY = prompt("請輸入您的 Gemini API Key：");
+            if (API_KEY) localStorage.setItem('my_gemini_key', API_KEY);
         }
 
         const genAI = new GoogleGenerativeAI(API_KEY);
 
+        // 2. 自動判定版本清單 (按優先順序測試)
+        const MODEL_CANDIDATES = [
+            "gemini-3.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
+        ];
+
         document.getElementById('cameraInput').onchange = async (e) => {
-            const file =
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('aiSection').classList.remove('hidden');
+            const responseDiv = document.getElementById('aiResponse');
+            const statusDiv = document.getElementById('mentorStatus');
+            responseDiv.innerText = "導師正在閱讀筆記...";
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onloadend = async () => {
+                const base64Data = reader.result.split(',')[1];
+                const history = JSON.parse(localStorage.getItem('davinci_history') || "[]");
+                
+                // 3. 嘗試不同版本直到成功
+                let success = false;
+                for (const modelName of MODEL_CANDIDATES) {
+                    try {
+                        statusDiv.innerText = `正在嘗試連線：${modelName}...`;
+                        const model = genAI.getGenerativeModel({ model: modelName });
+                        
+                        const prompt = `你是一位睿智的思維導師。請辨識此筆記並結合過往摘要：\n${history.join('\n')}\n給出一個深刻洞察與啟發問題。`;
+
+                        const result = await model.generateContent([
+                            prompt,
+                            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+                        ]);
+
+                        const text = result.response.text();
+                        responseDiv.innerText = text;
+                        statusDiv.innerText = `思維導師 (${modelName}) 已連線`;
+                        
+                        // 儲存記憶
+                        history.push(`- ${text.substring(0, 50)}`);
+                        if (history.length > 5) history.shift();
+                        localStorage.setItem('davinci_history', JSON.stringify(history));
+                        
+                        success = true;
+                        break; // 成功就跳出迴圈
+                    } catch (err) {
+                        console.warn(`${modelName} 失敗:`, err.message);
+                        continue; // 失敗就試下一個
+                    }
+                }
+
+                if (!success) {
+                    responseDiv.innerText = "抱歉，所有模型版本皆無法連線。請檢查您的 API Key 是否正確，或是否有該模型的存取權限。";
+                    statusDiv.innerText = "連線失敗";
+                }
+            };
+        };
+    </script>
+</body>
+</html>
